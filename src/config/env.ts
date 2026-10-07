@@ -1,0 +1,13 @@
+function required(name: string): string {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required env var: ${name} (see .env.example)`);
+  }
+  return value;
+}
+
+export const env = {
+  GOOGLE_APPLICATION_CREDENTIALS: required('GOOGLE_APPLICATION_CREDENTIALS'),
+  GOOGLE_CALENDAR_ID: required('GOOGLE_CALENDAR_ID'),
+  GOOGLE_SHEET_ID: required('GOOGLE_SHEET_ID'),
+};
