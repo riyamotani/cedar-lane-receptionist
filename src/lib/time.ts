@@ -2,7 +2,8 @@ import { DateTime } from 'luxon';
 import { SHOP, HOURS, CLOSED_DATES } from '../config/business';
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
-const TIME_PATTERN = /^(\d{1,2}):(\d{2})$/;
+// "4:30", "16:30", or with the caller's own am/pm attached: "4:30 pm".
+const TIME_PATTERN = /^(\d{1,2}):(\d{2})\s*(am|pm)?$/i;
 
 export type TimeResolution =
   | { kind: 'ok'; start: DateTime }
@@ -33,14 +34,15 @@ export function openingHours(day: DateTime): { open: DateTime; close: DateTime }
   };
 }
 
-// Turns what the caller said ("4:30", optional am/pm) into a start time, using business
-// hours to settle am vs pm. Only checks the start is within opening hours; whether the
-// job fits, bay capacity and notice rules are the availability module's job.
-export function resolveTime(day: DateTime, time: string, meridiem?: 'am' | 'pm'): TimeResolution {
-  const match = TIME_PATTERN.exec(time);
+// Turns what the caller said ("4:30" or "4:30 pm") into a start time, using business hours
+// to settle am vs pm when they didn't say. Only checks the start is within opening hours;
+// whether the job fits, bay capacity and notice rules are the availability module's job.
+export function resolveTime(day: DateTime, time: string): TimeResolution {
+  const match = TIME_PATTERN.exec(time.trim());
   if (!match) return { kind: 'invalid' };
   const hour = Number(match[1]);
   const minute = Number(match[2]);
+  const meridiem = match[3]?.toLowerCase();
   if (hour > 23 || minute > 59) return { kind: 'invalid' };
 
   let candidateHours: number[];
