@@ -26,6 +26,7 @@ export interface NewBooking {
   serviceId: string;
   serviceName: string;
   vehicleSize: VehicleSize;
+  vehicle?: string; // make and model, e.g. "Honda Civic"
   name: string;
   phone: string;
   price: number;
@@ -117,7 +118,7 @@ export async function createBooking(b: NewBooking): Promise<Booking> {
     description: [
       `Customer: ${b.name}`,
       `Phone: ${b.phone}`,
-      `Vehicle size: ${b.vehicleSize}`,
+      `Vehicle: ${b.vehicle ? `${b.vehicle} (${b.vehicleSize})` : b.vehicleSize}`,
       `Quoted price: $${b.price}`,
       b.notes ? `Notes: ${b.notes}` : '',
       'Booked by the AI receptionist.',

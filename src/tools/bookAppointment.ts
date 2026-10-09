@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { checkSlot, findAlternatives } from '../domain/availability';
 import { createBooking, findBookingsByPhone } from '../google/calendar';
+import { upsertCallLog, upsertContact } from '../google/sheets';
 import { runExclusive } from '../lib/mutex';
 import { normalizePhone } from '../lib/phone';
 import { nowInShop, parseShopDate, resolveTime } from '../lib/time';
@@ -15,6 +16,7 @@ export const bookAppointment = defineTool({
   schema: z.object({
     service_id: fields.service_id,
     vehicle_size: fields.vehicle_size,
+    vehicle: z.string().optional().describe("Make and model if the caller said it, e.g. 'Honda Civic'"),
     date: fields.date,
     time: fields.time,
     name: z.string().trim().min(1).describe("Caller's name"),
@@ -25,7 +27,7 @@ export const bookAppointment = defineTool({
       .optional()
       .describe('Set true only after the caller confirms this is an extra booking on top of an existing one.'),
   }),
-  async handler(input) {
+  async handler(input, ctx) {
     const phone = normalizePhone(input.phone);
     if (!phone) return fail('invalid_phone', 'That is not a valid 10-digit US or Canada number. Ask again.');
     const svc = resolveService(input.service_id, input.vehicle_size);
@@ -77,6 +79,7 @@ export const bookAppointment = defineTool({
         serviceId: svc.service.id,
         serviceName: svc.service.name,
         vehicleSize: input.vehicle_size,
+        vehicle: input.vehicle,
         name: input.name,
         phone,
         price: svc.price,
@@ -84,6 +87,21 @@ export const bookAppointment = defineTool({
         end: start.plus({ minutes: svc.minutes }),
         notes: input.notes,
       });
+
+      // The Calendar is the source of truth. If the Sheets update fails, the booking still
+      // stands and the caller still hears it's booked; the error goes to the server log.
+      try {
+        await upsertContact({ phone, name: input.name, vehicle: input.vehicle, vehicleSize: input.vehicle_size, booked: true });
+        await upsertCallLog(ctx.sessionId, ctx.channel, {
+          phone,
+          name: input.name,
+          intents: ['booking'],
+          outcome: 'booked',
+          eventId: booking.eventId,
+        });
+      } catch (err) {
+        console.error('[book_appointment] booked, but the Sheets update failed:', err);
+      }
       return { ok: true, booked: true, booking: bookingView(booking) };
     });
   },

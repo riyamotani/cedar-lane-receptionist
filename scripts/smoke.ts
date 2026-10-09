@@ -16,15 +16,16 @@ async function main() {
   }
 
   const marker = `smoke test ${new Date().toISOString()}`;
+  // Explicit tab: an unqualified 'A1' means "first tab", which could be Contacts' header row.
   await sheets.spreadsheets.values.update({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: 'A1',
+    range: 'Sheet1!A1',
     valueInputOption: 'RAW',
     requestBody: { values: [[marker]] },
   });
   const read = await sheets.spreadsheets.values.get({
     spreadsheetId: env.GOOGLE_SHEET_ID,
-    range: 'A1',
+    range: 'Sheet1!A1',
   });
   const value = read.data.values?.[0]?.[0];
   if (value !== marker) {

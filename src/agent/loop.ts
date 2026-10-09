@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { env } from '../config/env';
 import { nowInShop } from '../lib/time';
 import { TOOLS, findTool } from '../tools';
-import type { ToolResult } from '../tools/define';
+import type { ToolContext, ToolResult } from '../tools/define';
 import { buildSystemPrompt } from './prompt';
 
 export type ChatHistory = OpenAI.Chat.ChatCompletionMessageParam[];
@@ -20,7 +20,7 @@ const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = TOOLS.map((t) => ({
 
 // Runs one caller message to completion: call the LLM, run any tools it asks for, feed the
 // results back, repeat until it answers in plain text. Mutates history so the next turn has context.
-export async function runAgentTurn(history: ChatHistory, userText: string): Promise<string> {
+export async function runAgentTurn(history: ChatHistory, userText: string, ctx: ToolContext): Promise<string> {
   history.push({ role: 'user', content: userText });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
@@ -38,7 +38,7 @@ export async function runAgentTurn(history: ChatHistory, userText: string): Prom
 
     // Run tool calls one after another, in order: a check followed by a booking must not race.
     for (const call of message.tool_calls) {
-      const result = await runToolCall(call);
+      const result = await runToolCall(call, ctx);
       history.push({ role: 'tool', tool_call_id: call.id, content: JSON.stringify(result) });
     }
   }
@@ -47,7 +47,7 @@ export async function runAgentTurn(history: ChatHistory, userText: string): Prom
   return FALLBACK_REPLY;
 }
 
-async function runToolCall(call: OpenAI.Chat.ChatCompletionMessageToolCall): Promise<ToolResult> {
+async function runToolCall(call: OpenAI.Chat.ChatCompletionMessageToolCall, ctx: ToolContext): Promise<ToolResult> {
   if (call.type !== 'function') {
     return { ok: false, error: 'unsupported_tool_call', message: 'Only function tools are supported.' };
   }
@@ -64,7 +64,7 @@ async function runToolCall(call: OpenAI.Chat.ChatCompletionMessageToolCall): Pro
     return { ok: false, error: 'invalid_json', message: 'Tool arguments were not valid JSON.' };
   }
 
-  const result = await tool.run(args);
+  const result = await tool.run(args, ctx);
   console.log(`  [${tool.name}] ${JSON.stringify(args)}\n  -> ${JSON.stringify(result)}`);
   return result;
 }

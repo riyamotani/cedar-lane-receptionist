@@ -8,6 +8,7 @@
     "smoke": "tsx --env-file=.env scripts/smoke.ts",
     "seed": "tsx --env-file=.env scripts/seed-calendar.ts",
     "chat": "tsx --env-file=.env scripts/chat.ts",
+    "setup-sheet": "tsx --env-file=.env scripts/setup-sheet.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
