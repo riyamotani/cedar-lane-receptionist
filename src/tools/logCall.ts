@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { upsertCallLog } from '../google/sheets';
+import { recordInteraction } from '../google/sheets';
 import { normalizePhone } from '../lib/phone';
 import { defineTool } from './define';
 
@@ -29,11 +29,13 @@ export const logCall = defineTool({
   // not by the model's description of it.
   async handler(input, ctx) {
     try {
-      await upsertCallLog(ctx.sessionId, ctx.channel, {
+      // Only a valid number becomes the contact key; an invalid one is dropped rather than
+      // creating a contact row keyed by garbage.
+      await recordInteraction(ctx.sessionId, ctx.channel, {
         summary: input.summary,
         intents: [...input.intents],
         name: input.name,
-        phone: input.phone ? (normalizePhone(input.phone) ?? input.phone) : undefined,
+        phone: input.phone ? (normalizePhone(input.phone) ?? undefined) : undefined,
       });
       return { ok: true, logged: true };
     } catch (err) {

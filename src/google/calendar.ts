@@ -184,6 +184,17 @@ export async function moveBooking(eventId: string, start: DateTime, end: DateTim
   return toBooking(res.data)!;
 }
 
+// Appends a line to the event description (e.g. "running 10 min late") so staff see it.
+// Skips if the same line is already there, so a retried call doesn't add it twice.
+export async function addNoteToBooking(eventId: string, note: string): Promise<void> {
+  const res = await withRetry(() => calendar.events.get({ calendarId, eventId }));
+  const description = res.data.description ?? '';
+  if (description.includes(note)) return;
+  await withRetry(() =>
+    calendar.events.patch({ calendarId, eventId, requestBody: { description: `${description}\n${note}`.trim() } }),
+  );
+}
+
 export async function cancelBooking(eventId: string): Promise<void> {
   try {
     await withRetry(() => calendar.events.delete({ calendarId, eventId }));

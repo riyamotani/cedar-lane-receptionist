@@ -15,14 +15,18 @@ export const checkAvailability = defineTool({
     vehicle_size: fields.vehicle_size,
     date: fields.date,
     time: fields.time.optional(),
+    reschedule_event_id: z
+      .string()
+      .optional()
+      .describe("When finding a new time for an existing booking, its event_id, so the booking doesn't block itself."),
   }),
-  async handler({ service_id, vehicle_size, date, time }) {
+  async handler({ service_id, vehicle_size, date, time, reschedule_event_id }) {
     const svc = resolveService(service_id, vehicle_size);
     if (!svc.ok) return svc;
     const day = parseShopDate(date);
     if (!day) return fail('invalid_date', 'Date must be a real date in YYYY-MM-DD format.');
 
-    const schedule = await scheduleAround(day, nowInShop());
+    const schedule = await scheduleAround(day, nowInShop(), reschedule_event_id);
     const details = { service: svc.service.name, vehicle_size, price: svc.price, duration_minutes: svc.minutes };
     const alternativesFrom = (from: DateTime) =>
       findAlternatives(from, svc.minutes, schedule).map(slotView);

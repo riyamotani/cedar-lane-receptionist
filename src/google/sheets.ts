@@ -67,7 +67,7 @@ function findRow(rows: string[][], headers: string[], column: string, value: str
 
 export interface ContactUpdate {
   phone: string; // E.164, the key
-  name: string;
+  name?: string;
   vehicle?: string;
   vehicleSize?: string;
   booked: boolean;
@@ -81,7 +81,7 @@ export async function upsertContact(u: ContactUpdate): Promise<void> {
   if (!found) {
     await appendRow(CONTACTS_TAB, toValues(CONTACT_HEADERS, {
       phone: u.phone,
-      name: u.name,
+      name: u.name ?? '',
       vehicle: u.vehicle ?? '',
       vehicle_size: u.vehicleSize ?? '',
       first_seen: now,
@@ -91,7 +91,7 @@ export async function upsertContact(u: ContactUpdate): Promise<void> {
     return;
   }
   const row = found.row;
-  row.name = u.name;
+  row.name = u.name || row.name || '';
   row.vehicle = u.vehicle || row.vehicle || '';
   row.vehicle_size = u.vehicleSize || row.vehicle_size || '';
   row.last_seen = now;
@@ -141,4 +141,26 @@ export async function upsertCallLog(sessionId: string, channel: string, u: CallL
   const values = toValues(CALL_LOG_HEADERS, row);
   if (found) await writeRow(CALL_LOG_TAB, found.rowNumber, values);
   else await appendRow(CALL_LOG_TAB, values);
+}
+
+export interface InteractionUpdate extends CallLogUpdate {
+  vehicle?: string;
+  vehicleSize?: string;
+  booked?: boolean;
+}
+
+// The single entry point tools use. Updates this conversation's CallLog row and, whenever we
+// know the caller's phone (E.164), their Contacts row too: the brief asks for a row per caller,
+// not just per customer who booked.
+export async function recordInteraction(sessionId: string, channel: string, u: InteractionUpdate): Promise<void> {
+  await upsertCallLog(sessionId, channel, u);
+  if (u.phone) {
+    await upsertContact({
+      phone: u.phone,
+      name: u.name,
+      vehicle: u.vehicle,
+      vehicleSize: u.vehicleSize,
+      booked: u.booked ?? false,
+    });
+  }
 }

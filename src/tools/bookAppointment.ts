@@ -1,12 +1,21 @@
 import { z } from 'zod';
 import { checkSlot, findAlternatives } from '../domain/availability';
 import { createBooking, findBookingsByPhone } from '../google/calendar';
-import { upsertCallLog, upsertContact } from '../google/sheets';
+import { recordInteraction } from '../google/sheets';
 import { runExclusive } from '../lib/mutex';
 import { normalizePhone } from '../lib/phone';
-import { nowInShop, parseShopDate, resolveTime } from '../lib/time';
+import { nowInShop } from '../lib/time';
 import { defineTool, fail } from './define';
-import { STATUS_MESSAGES, bookingView, fields, resolveService, scheduleAround, slotView } from './common';
+import {
+  INVALID_PHONE,
+  STATUS_MESSAGES,
+  bookingView,
+  fields,
+  resolveRequestedStart,
+  resolveService,
+  scheduleAround,
+  slotView,
+} from './common';
 
 export const bookAppointment = defineTool({
   name: 'book_appointment',
@@ -19,8 +28,8 @@ export const bookAppointment = defineTool({
     vehicle: z.string().optional().describe("Make and model if the caller said it, e.g. 'Honda Civic'"),
     date: fields.date,
     time: fields.time,
-    name: z.string().trim().min(1).describe("Caller's name"),
-    phone: z.string().describe("Caller's phone number, digits as given"),
+    name: fields.name,
+    phone: fields.phone,
     notes: z.string().optional().describe('Anything useful for the detailer, e.g. "dog hair in back seat"'),
     additional_booking_confirmed: z
       .boolean()
@@ -29,18 +38,12 @@ export const bookAppointment = defineTool({
   }),
   async handler(input, ctx) {
     const phone = normalizePhone(input.phone);
-    if (!phone) return fail('invalid_phone', 'That is not a valid 10-digit US or Canada number. Ask again.');
+    if (!phone) return fail('invalid_phone', INVALID_PHONE);
     const svc = resolveService(input.service_id, input.vehicle_size);
     if (!svc.ok) return svc;
-    const day = parseShopDate(input.date);
-    if (!day) return fail('invalid_date', 'Date must be a real date in YYYY-MM-DD format.');
-    const resolved = resolveTime(day, input.time);
-    if (resolved.kind === 'invalid') return fail('invalid_time', `Got "${input.time}", which is not a real time. Use H:mm, e.g. '4:30'.`);
-    if (resolved.kind === 'ambiguous') return fail('ambiguous_time', 'Ask whether they mean morning or evening.');
-    if (resolved.kind === 'outside_hours') {
-      return fail('outside_hours', 'Outside opening hours or the shop is closed that day. Use check_availability to find open times.');
-    }
-    const start = resolved.start;
+    const requested = resolveRequestedStart(input.date, input.time);
+    if (!requested.ok) return requested;
+    const start = requested.start;
 
     // One booking at a time: nothing can be written between our check and our insert.
     return runExclusive(async () => {
@@ -91,10 +94,12 @@ export const bookAppointment = defineTool({
       // The Calendar is the source of truth. If the Sheets update fails, the booking still
       // stands and the caller still hears it's booked; the error goes to the server log.
       try {
-        await upsertContact({ phone, name: input.name, vehicle: input.vehicle, vehicleSize: input.vehicle_size, booked: true });
-        await upsertCallLog(ctx.sessionId, ctx.channel, {
+        await recordInteraction(ctx.sessionId, ctx.channel, {
           phone,
           name: input.name,
+          vehicle: input.vehicle,
+          vehicleSize: input.vehicle_size,
+          booked: true,
           intents: ['booking'],
           outcome: 'booked',
           eventId: booking.eventId,

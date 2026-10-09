@@ -1,9 +1,9 @@
 import type { DateTime } from 'luxon';
 import { z } from 'zod';
 import { SERVICES, SHOP, VEHICLE_SIZES, findService, type VehicleSize } from '../config/business';
-import { formatForCaller, openingHours } from '../lib/time';
+import { formatForCaller, openingHours, parseShopDate, resolveTime } from '../lib/time';
 import type { Schedule, SlotStatus } from '../domain/availability';
-import { getSchedule, type Booking } from '../google/calendar';
+import { findBookingsByPhone, getBooking, getSchedule, type Booking } from '../google/calendar';
 import { fail } from './define';
 
 // Schema fields shared by several tools, so their descriptions stay identical.
@@ -25,7 +25,11 @@ export const fields = {
       "Time exactly as the caller said it, as H:mm. Add am/pm ONLY if the caller said am/pm, morning, afternoon or evening. " +
         "'3:30' -> '3:30'; 'half past four' -> '4:30'; '7 in the evening' -> '7:00 pm'.",
     ),
+  phone: z.string().describe("Caller's phone number, digits as given"),
+  name: z.string().trim().min(1).describe("Caller's name as they gave it"),
 };
+
+export const INVALID_PHONE = 'That is not a valid 10-digit US or Canada number. Ask again.';
 
 export const STATUS_MESSAGES: Record<SlotStatus, string> = {
   open: 'That time is available.',
@@ -44,10 +48,49 @@ export function resolveService(serviceId: string, size: VehicleSize) {
     return fail('unknown_service', `Unknown service_id "${serviceId}". Valid ids: ${SERVICES.map((s) => s.id).join(', ')}.`);
   }
   if (!service.options) {
-    return fail('quote_only', `${service.name} is priced by quote after inspection and can't be booked directly. Offer a callback from the team.`);
+    return fail('quote_only', `${service.name} is priced by quote after inspection and can't be booked directly. Offer a callback: request_human_handoff with category quote.`);
   }
   const { minutes, price } = service.options[size];
   return { ok: true as const, service, minutes, price };
+}
+
+// Date + time as the caller said them -> a start time, or a failure the LLM can act on.
+// Shared by booking and rescheduling so both reject bad input the same way.
+export function resolveRequestedStart(date: string, time: string) {
+  const day = parseShopDate(date);
+  if (!day) return fail('invalid_date', 'Date must be a real date in YYYY-MM-DD format.');
+  const resolved = resolveTime(day, time);
+  if (resolved.kind === 'invalid') return fail('invalid_time', `Got "${time}", which is not a real time. Use H:mm, e.g. '4:30'.`);
+  if (resolved.kind === 'ambiguous') return fail('ambiguous_time', 'Ask whether they mean morning or evening.');
+  if (resolved.kind === 'outside_hours') {
+    return fail('outside_hours', 'Outside opening hours or the shop is closed that day. Use check_availability to find open times.');
+  }
+  return { ok: true as const, start: resolved.start };
+}
+
+// Identity check for existing bookings: the phone must match (enforced by the lookup) AND the
+// first name must match. A phone number alone isn't identity, so a mismatch reveals nothing.
+const firstName = (s: string) => s.trim().toLowerCase().split(/\s+/)[0] ?? '';
+const sameFirstName = (a: string, b: string) => firstName(a) !== '' && firstName(a) === firstName(b);
+const NAME_MISMATCH =
+  "The name doesn't match the booking under this number. Don't share any booking details; ask them to check the name or number, or offer a callback.";
+
+export async function findCallerBookings(phone: string, name: string, now: DateTime) {
+  const all = await findBookingsByPhone(phone, now);
+  if (all.length === 0) return fail('no_bookings', 'No upcoming bookings under that number. Ask them to double-check it.');
+  const mine = all.filter((b) => sameFirstName(b.name, name));
+  if (mine.length === 0) return fail('name_mismatch', NAME_MISMATCH);
+  return { ok: true as const, bookings: mine };
+}
+
+// For tools that act on one booking by id: the id came from the LLM, so re-check ownership.
+export async function getOwnedBooking(eventId: string, phone: string, name: string) {
+  const booking = await getBooking(eventId);
+  if (!booking || booking.phone !== phone) {
+    return fail('not_found', 'No booking with that id under this number. Use find_appointments first.');
+  }
+  if (!sameFirstName(booking.name, name)) return fail('name_mismatch', NAME_MISMATCH);
+  return { ok: true as const, booking };
 }
 
 // Busy events for the day plus the following week, which is what findAlternatives searches.
