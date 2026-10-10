@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cedar Lane Auto Detailing</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; color: #1a1a1a; }
+    header { display: flex; justify-content: space-between; align-items: center; }
+    h1 { font-size: 18px; margin: 0; }
+    #messages { border: 1px solid #ddd; border-radius: 8px; height: 60vh; overflow-y: auto; padding: 12px; margin: 12px 0; }
+    .msg { margin: 8px 0; padding: 8px 12px; border-radius: 12px; max-width: 80%; white-space: pre-wrap; }
+    .caller { background: #1f6feb; color: #fff; margin-left: auto; }
+    .agent { background: #f0f0f0; }
+    .error { background: #fde8e8; color: #9b1c1c; }
+    form { display: flex; gap: 8px; }
+    input { flex: 1; padding: 10px; font-size: 15px; border: 1px solid #ccc; border-radius: 8px; }
+    button { padding: 10px 16px; font-size: 15px; border: 0; border-radius: 8px; background: #1f6feb; color: #fff; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    #new { background: #666; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cedar Lane Auto Detailing</h1>
+    <button id="new" type="button">New conversation</button>
+  </header>
+  <div id="messages"></div>
+  <form id="form">
+    <input id="input" autocomplete="off" placeholder="Type a message..." autofocus>
+    <button id="send">Send</button>
+  </form>
+
+  <script>
+    // A new id per page load: reloading (or "New conversation") starts a fresh session.
+    const sessionId = crypto.randomUUID();
+    const messages = document.getElementById('messages');
+    const form = document.getElementById('form');
+    const input = document.getElementById('input');
+    const send = document.getElementById('send');
+
+    function show(text, kind) {
+      const el = document.createElement('div');
+      el.className = 'msg ' + kind;
+      el.textContent = text; // textContent, not innerHTML: message text is never run as HTML
+      messages.appendChild(el);
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const text = input.value.trim();
+      if (!text) return;
+      show(text, 'caller');
+      input.value = '';
+      send.disabled = true; // one message at a time
+      try {
+        const res = await fetch('/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, message: text }),
+        });
+        const data = await res.json();
+        if (res.ok) show(data.reply, 'agent');
+        else show(data.error || 'Something went wrong.', 'error');
+      } catch {
+        show('Could not reach the server.', 'error');
+      } finally {
+        send.disabled = false;
+        input.focus();
+      }
+    });
+
+    document.getElementById('new').addEventListener('click', () => location.reload());
+  </script>
+</body>
+</html>

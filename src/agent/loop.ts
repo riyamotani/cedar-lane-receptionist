@@ -21,6 +21,18 @@ const toolDefinitions: OpenAI.Chat.ChatCompletionTool[] = TOOLS.map((t) => ({
 // Runs one caller message to completion: call the LLM, run any tools it asks for, feed the
 // results back, repeat until it answers in plain text. Mutates history so the next turn has context.
 export async function runAgentTurn(history: ChatHistory, userText: string, ctx: ToolContext): Promise<string> {
+  // If anything throws mid-turn (e.g. the LLM API fails), undo this turn's messages. Otherwise
+  // history could end in a tool call with no result, and the API rejects every later request.
+  const checkpoint = history.length;
+  try {
+    return await runTurn(history, userText, ctx);
+  } catch (err) {
+    history.length = checkpoint;
+    throw err;
+  }
+}
+
+async function runTurn(history: ChatHistory, userText: string, ctx: ToolContext): Promise<string> {
   history.push({ role: 'user', content: userText });
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
