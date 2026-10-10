@@ -65,6 +65,29 @@ function findRow(rows: string[][], headers: string[], column: string, value: str
   return null;
 }
 
+export interface Contact {
+  phone: string;
+  name: string;
+  vehicle: string;
+  vehicleSize: string;
+  bookingCount: number;
+  notes: string;
+}
+
+export async function findContact(phone: string): Promise<Contact | null> {
+  const found = findRow(await readRows(CONTACTS_TAB), CONTACT_HEADERS, 'phone', phone);
+  if (!found) return null;
+  const row = found.row;
+  return {
+    phone,
+    name: row.name ?? '',
+    vehicle: row.vehicle ?? '',
+    vehicleSize: row.vehicle_size ?? '',
+    bookingCount: Number(row.booking_count || 0),
+    notes: row.notes ?? '',
+  };
+}
+
 export interface ContactUpdate {
   phone: string; // E.164, the key
   name?: string;

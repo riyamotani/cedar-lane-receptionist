@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { env } from '../config/env';
+import { logEvent } from '../lib/log';
 import { nowInShop } from '../lib/time';
 import { TOOLS, findTool } from '../tools';
 import type { ToolContext, ToolResult } from '../tools/define';
@@ -34,6 +35,7 @@ export async function runAgentTurn(history: ChatHistory, userText: string, ctx: 
 
 async function runTurn(history: ChatHistory, userText: string, ctx: ToolContext): Promise<string> {
   history.push({ role: 'user', content: userText });
+  logEvent(ctx.sessionId, `caller: ${userText}`, false);
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     const response = await client.chat.completions.create({
@@ -46,7 +48,10 @@ async function runTurn(history: ChatHistory, userText: string, ctx: ToolContext)
     if (!message) throw new Error('LLM returned no message');
     history.push(message);
 
-    if (!message.tool_calls?.length) return message.content ?? '';
+    if (!message.tool_calls?.length) {
+      logEvent(ctx.sessionId, `agent: ${message.content ?? ''}`, false);
+      return message.content ?? '';
+    }
 
     // Run tool calls one after another, in order: a check followed by a booking must not race.
     for (const call of message.tool_calls) {
@@ -77,6 +82,6 @@ async function runToolCall(call: OpenAI.Chat.ChatCompletionMessageToolCall, ctx:
   }
 
   const result = await tool.run(args, ctx);
-  console.log(`  [${tool.name}] ${JSON.stringify(args)}\n  -> ${JSON.stringify(result)}`);
+  logEvent(ctx.sessionId, `  [${tool.name}] ${JSON.stringify(args)}\n  -> ${JSON.stringify(result)}`);
   return result;
 }
