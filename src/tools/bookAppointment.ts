@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { checkSlot, findAlternatives } from '../domain/availability';
 import { createBooking, findBookingsByPhone } from '../google/calendar';
-import { recordInteraction } from '../google/sheets';
+import { recordInBackground } from '../google/sheets';
 import { runExclusive } from '../lib/mutex';
 import { normalizePhone } from '../lib/phone';
 import { nowInShop } from '../lib/time';
@@ -48,7 +48,11 @@ export const bookAppointment = defineTool({
     // One booking at a time: nothing can be written between our check and our insert.
     return runExclusive(async () => {
       const now = nowInShop();
-      const existing = await findBookingsByPhone(phone, now);
+      // Two independent Calendar reads, run together to cut the wait on a phone call.
+      const [existing, schedule] = await Promise.all([
+        findBookingsByPhone(phone, now),
+        scheduleAround(start, now),
+      ]);
 
       // Same caller, same service, same time: usually the LLM or caller repeating themselves, so
       // return the existing booking. Only an explicit confirmation (e.g. a second car) books another.
@@ -69,7 +73,6 @@ export const bookAppointment = defineTool({
         );
       }
 
-      const schedule = await scheduleAround(start, now);
       const status = checkSlot(start, svc.minutes, schedule);
       if (status !== 'open') {
         return fail('slot_unavailable', STATUS_MESSAGES[status], {
@@ -91,22 +94,18 @@ export const bookAppointment = defineTool({
         notes: input.notes,
       });
 
-      // The Calendar is the source of truth. If the Sheets update fails, the booking still
-      // stands and the caller still hears it's booked; the error goes to the server log.
-      try {
-        await recordInteraction(ctx.sessionId, ctx.channel, {
-          phone,
-          name: input.name,
-          vehicle: input.vehicle,
-          vehicleSize: input.vehicle_size,
-          booked: true,
-          intents: ['booking'],
-          outcome: 'booked',
-          eventId: booking.eventId,
-        });
-      } catch (err) {
-        console.error('[book_appointment] booked, but the Sheets update failed:', err);
-      }
+      // The Calendar is the source of truth, so the answer doesn't wait for the Sheet. If the
+      // Sheets update fails, the booking still stands; the error goes to the server log.
+      recordInBackground('book_appointment', ctx.sessionId, ctx.channel, {
+        phone,
+        name: input.name,
+        vehicle: input.vehicle,
+        vehicleSize: input.vehicle_size,
+        booked: true,
+        intents: ['booking'],
+        outcome: 'booked',
+        eventId: booking.eventId,
+      });
       return { ok: true, booked: true, booking: bookingView(booking) };
     });
   },

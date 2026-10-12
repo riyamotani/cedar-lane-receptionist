@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { SHOP } from '../config/business';
 import { addNoteToBooking } from '../google/calendar';
-import { recordInteraction } from '../google/sheets';
+import { recordInBackground } from '../google/sheets';
 import { normalizePhone } from '../lib/phone';
 import { nowInShop } from '../lib/time';
 import { defineTool, fail } from './define';
@@ -32,17 +32,13 @@ export const reportRunningLate = defineTool({
     if (withinGrace) {
       await addNoteToBooking(today.eventId, `Running ~${input.minutes_late} min late (customer called at ${now.toFormat('h:mm a')}).`);
     }
-    try {
-      await recordInteraction(ctx.sessionId, ctx.channel, {
-        phone,
-        name: input.name,
-        intents: ['running_late'],
-        outcome: withinGrace ? 'late_noted' : undefined,
-        eventId: today.eventId,
-      });
-    } catch (err) {
-      console.error('[report_running_late] Sheets update failed:', err);
-    }
+    recordInBackground('report_running_late', ctx.sessionId, ctx.channel, {
+      phone,
+      name: input.name,
+      intents: ['running_late'],
+      outcome: withinGrace ? 'late_noted' : undefined,
+      eventId: today.eventId,
+    });
 
     return withinGrace
       ? { ok: true, within_grace: true, booking: bookingView(today), message: "Noted on the booking. Tell them that's fine and we'll see them soon." }

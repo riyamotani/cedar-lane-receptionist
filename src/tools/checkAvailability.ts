@@ -1,9 +1,9 @@
 import type { DateTime } from 'luxon';
 import { z } from 'zod';
 import { checkSlot, findAlternatives, openSlotsOnDay } from '../domain/availability';
-import { nowInShop, parseShopDate, resolveTime } from '../lib/time';
+import { nowInShop, resolveTime } from '../lib/time';
 import { defineTool, fail } from './define';
-import { STATUS_MESSAGES, fields, hoursText, resolveService, scheduleAround, slotView } from './common';
+import { STATUS_MESSAGES, fields, hoursText, resolveRequestedDay, resolveService, scheduleAround, slotView } from './common';
 
 export const checkAvailability = defineTool({
   name: 'check_availability',
@@ -20,16 +20,19 @@ export const checkAvailability = defineTool({
       .optional()
       .describe("When finding a new time for an existing booking, its event_id, so the booking doesn't block itself."),
   }),
-  async handler({ service_id, vehicle_size, date, time, reschedule_event_id }) {
+  async handler({ service_id, vehicle_size, date, time, reschedule_event_id }, ctx) {
     const svc = resolveService(service_id, vehicle_size);
     if (!svc.ok) return svc;
-    const day = parseShopDate(date);
-    if (!day) return fail('invalid_date', 'Date must be a real date in YYYY-MM-DD format.');
+    const requestedDay = resolveRequestedDay(date, time, nowInShop());
+    if (!requestedDay.ok) return requestedDay;
+    const day = requestedDay.day;
 
     const schedule = await scheduleAround(day, nowInShop(), reschedule_event_id);
     const details = { service: svc.service.name, vehicle_size, price: svc.price, duration_minutes: svc.minutes };
+    // Three options read fine in chat; spoken aloud, two is as many as a caller can hold.
+    const limit = ctx.channel === 'voice' ? 2 : 3;
     const alternativesFrom = (from: DateTime) =>
-      findAlternatives(from, svc.minutes, schedule).map(slotView);
+      findAlternatives(from, svc.minutes, schedule, limit).map(slotView);
 
     // Closed days first, so "Sunday at 10" says "closed", not "outside hours".
     const hours = hoursText(day, schedule);

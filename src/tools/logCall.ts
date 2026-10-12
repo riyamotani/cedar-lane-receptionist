@@ -3,7 +3,7 @@ import { recordInteraction } from '../google/sheets';
 import { normalizePhone } from '../lib/phone';
 import { defineTool } from './define';
 
-const INTENTS = [
+export const INTENTS = [
   'booking', 'availability', 'pricing', 'hours', 'prep', 'vehicle_type',
   'reschedule', 'cancel', 'running_late', 'complaint', 'other',
 ] as const;

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { checkSlot, findAlternatives } from '../domain/availability';
 import { moveBooking } from '../google/calendar';
-import { recordInteraction } from '../google/sheets';
+import { recordInBackground } from '../google/sheets';
 import { runExclusive } from '../lib/mutex';
 import { normalizePhone } from '../lib/phone';
 import { nowInShop } from '../lib/time';
@@ -60,17 +60,13 @@ export const rescheduleAppointment = defineTool({
 
       // Move rather than cancel-and-rebook: the customer is never left without a booking.
       const moved = await moveBooking(old.eventId, start, start.plus({ minutes }));
-      try {
-        await recordInteraction(ctx.sessionId, ctx.channel, {
-          phone,
-          name: input.name,
-          intents: ['reschedule'],
-          outcome: 'rescheduled',
-          eventId: moved.eventId,
-        });
-      } catch (err) {
-        console.error('[reschedule_appointment] moved, but the Sheets update failed:', err);
-      }
+      recordInBackground('reschedule_appointment', ctx.sessionId, ctx.channel, {
+        phone,
+        name: input.name,
+        intents: ['reschedule'],
+        outcome: 'rescheduled',
+        eventId: moved.eventId,
+      });
       return { ok: true, rescheduled: true, previous: slotView(old.start), booking: bookingView(moved) };
     });
   },

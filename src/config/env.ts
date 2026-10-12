@@ -1,4 +1,6 @@
-function required(name: string): string {
+// Exported for settings only some entry points need (e.g. Vapi), read at the point of use so
+// the text chat doesn't require them.
+export function required(name: string): string {
   const value = process.env[name];
   if (!value) {
     throw new Error(`Missing required env var: ${name} (see .env.example)`);

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { cancelBooking } from '../google/calendar';
-import { recordInteraction } from '../google/sheets';
+import { recordInBackground } from '../google/sheets';
 import { normalizePhone } from '../lib/phone';
 import { nowInShop } from '../lib/time';
 import { defineTool, fail } from './define';
@@ -27,17 +27,13 @@ export const cancelAppointment = defineTool({
     }
 
     await cancelBooking(booking.eventId);
-    try {
-      await recordInteraction(ctx.sessionId, ctx.channel, {
-        phone,
-        name: input.name,
-        intents: ['cancel'],
-        outcome: 'cancelled',
-        eventId: booking.eventId,
-      });
-    } catch (err) {
-      console.error('[cancel_appointment] cancelled, but the Sheets update failed:', err);
-    }
+    recordInBackground('cancel_appointment', ctx.sessionId, ctx.channel, {
+      phone,
+      name: input.name,
+      intents: ['cancel'],
+      outcome: 'cancelled',
+      eventId: booking.eventId,
+    });
     return { ok: true, cancelled: true, booking: bookingView(booking) };
   },
 });

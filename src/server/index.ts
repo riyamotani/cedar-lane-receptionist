@@ -2,17 +2,21 @@ import express from 'express';
 import { z } from 'zod';
 import { runAgentTurn } from '../agent/loop';
 import { getSession } from './sessions';
+import { vapiRouter } from './vapi';
 
 const app = express();
-app.use(express.json({ limit: '10kb' }));
 app.use(express.static('public'));
+
+// Each route gets its own body-size limit: chat messages are tiny, while Vapi's end-of-call
+// report carries the whole transcript.
+app.use('/vapi', express.json({ limit: '5mb' }), vapiRouter);
 
 const ChatRequest = z.object({
   sessionId: z.string().min(8).max(100),
   message: z.string().trim().min(1).max(2000),
 });
 
-app.post('/chat', async (req, res) => {
+app.post('/chat', express.json({ limit: '10kb' }), async (req, res) => {
   const parsed = ChatRequest.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: 'Invalid request.' });

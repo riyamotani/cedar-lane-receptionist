@@ -1,14 +1,13 @@
-import OpenAI from 'openai';
+import type OpenAI from 'openai';
 import { env } from '../config/env';
 import { logEvent } from '../lib/log';
 import { nowInShop } from '../lib/time';
 import { TOOLS, findTool } from '../tools';
 import type { ToolContext, ToolResult } from '../tools/define';
+import { llm } from './llm';
 import { buildSystemPrompt } from './prompt';
 
 export type ChatHistory = OpenAI.Chat.ChatCompletionMessageParam[];
-
-const client = new OpenAI({ apiKey: env.LLM_API_KEY, baseURL: env.LLM_BASE_URL });
 
 // Stops a model stuck in a tool-calling loop from burning credit forever.
 const MAX_TOOL_ROUNDS = 8;
@@ -38,7 +37,7 @@ async function runTurn(history: ChatHistory, userText: string, ctx: ToolContext)
   logEvent(ctx.sessionId, `caller: ${userText}`, false);
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await client.chat.completions.create({
+    const response = await llm.chat.completions.create({
       model: env.LLM_MODEL,
       // Rebuilt every call so "now" and the date table are always current.
       messages: [{ role: 'system', content: buildSystemPrompt(nowInShop()) }, ...history],
@@ -81,7 +80,8 @@ async function runToolCall(call: OpenAI.Chat.ChatCompletionMessageToolCall, ctx:
     return { ok: false, error: 'invalid_json', message: 'Tool arguments were not valid JSON.' };
   }
 
+  const started = Date.now();
   const result = await tool.run(args, ctx);
-  logEvent(ctx.sessionId, `  [${tool.name}] ${JSON.stringify(args)}\n  -> ${JSON.stringify(result)}`);
+  logEvent(ctx.sessionId, `  [${tool.name}] ${Date.now() - started}ms ${JSON.stringify(args)}\n  -> ${JSON.stringify(result)}`);
   return result;
 }

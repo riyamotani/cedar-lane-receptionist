@@ -1,5 +1,6 @@
 import { sheets } from './auth';
 import { env } from '../config/env';
+import { createQueue } from '../lib/mutex';
 import { withRetry } from '../lib/retry';
 import { nowInShop } from '../lib/time';
 
@@ -175,15 +176,32 @@ export interface InteractionUpdate extends CallLogUpdate {
 // The single entry point tools use. Updates this conversation's CallLog row and, whenever we
 // know the caller's phone (E.164), their Contacts row too: the brief asks for a row per caller,
 // not just per customer who booked.
-export async function recordInteraction(sessionId: string, channel: string, u: InteractionUpdate): Promise<void> {
-  await upsertCallLog(sessionId, channel, u);
-  if (u.phone) {
-    await upsertContact({
-      phone: u.phone,
-      name: u.name,
-      vehicle: u.vehicle,
-      vehicleSize: u.vehicleSize,
-      booked: u.booked ?? false,
-    });
-  }
+//
+// Every update goes through one queue. Each is "read the tab, then write a row", so two running
+// at once could both miss an existing row and add it twice. The queue also makes it safe for a
+// caller not to wait for the write (see recordInBackground).
+const sheetQueue = createQueue();
+
+export function recordInteraction(sessionId: string, channel: string, u: InteractionUpdate): Promise<void> {
+  return sheetQueue(async () => {
+    await upsertCallLog(sessionId, channel, u);
+    if (u.phone) {
+      await upsertContact({
+        phone: u.phone,
+        name: u.name,
+        vehicle: u.vehicle,
+        vehicleSize: u.vehicleSize,
+        booked: u.booked ?? false,
+      });
+    }
+  });
+}
+
+// For writes the caller's answer doesn't depend on (after a booking, the Calendar event already
+// exists). Returns immediately, so the caller hears "you're booked" without waiting ~2 seconds
+// for Sheets; a failure is logged and never undoes the booking.
+export function recordInBackground(label: string, sessionId: string, channel: string, u: InteractionUpdate): void {
+  recordInteraction(sessionId, channel, u).catch((err) => {
+    console.error(`[${label}] done, but the Sheets update failed:`, err);
+  });
 }

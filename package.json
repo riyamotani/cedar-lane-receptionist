@@ -9,6 +9,8 @@
     "seed": "tsx --env-file=.env scripts/seed-calendar.ts",
     "chat": "tsx --env-file=.env scripts/chat.ts",
     "setup-sheet": "tsx --env-file=.env scripts/setup-sheet.ts",
+    "vapi:sync": "tsx --env-file=.env scripts/vapi-sync.ts",
+    "vapi:test": "tsx --env-file=.env scripts/vapi-test.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

@@ -1,7 +1,7 @@
 import type { DateTime } from 'luxon';
 import { z } from 'zod';
 import { SERVICES, SHOP, VEHICLE_SIZES, findService, type VehicleSize } from '../config/business';
-import { formatForCaller, openingHours, parseShopDate, resolveTime } from '../lib/time';
+import { formatForCaller, formatForSpeech, nowInShop, openingHours, resolveShopDay, resolveTime } from '../lib/time';
 import type { Schedule, SlotStatus } from '../domain/availability';
 import { findBookingsByPhone, getBooking, getSchedule, type Booking } from '../google/calendar';
 import { fail } from './define';
@@ -12,7 +12,14 @@ export const fields = {
   vehicle_size: z
     .enum(VEHICLE_SIZES)
     .describe('sedan, suv or truck_van. Ask the caller if unknown; map models (Civic = sedan, RAV4 = suv, F-150 = truck_van).'),
-  date: z.string().describe('Shop-local date as YYYY-MM-DD. Use the date table in your instructions.'),
+  // The model copies the caller's word; code works out the date. A model asked to convert
+  // "Thursday" itself once sent Wednesday's date.
+  date: z
+    .string()
+    .describe(
+      "The day exactly as the caller said it: a weekday ('thursday', 'next thursday'), 'today' or 'tomorrow'. " +
+        "Never turn a weekday into a date yourself. Only if they gave a calendar date ('October 15th'), pass it as YYYY-MM-DD.",
+    ),
   // No separate am/pm field: an empty optional field invites the model to guess. It copies what
   // the caller said instead, and code works out am/pm from opening hours.
   // The pattern is shown to the LLM up front; the error echoes what it sent so it can see its mistake.
@@ -54,12 +61,28 @@ export function resolveService(serviceId: string, size: VehicleSize) {
   return { ok: true as const, service, minutes, price };
 }
 
+// The day as the caller said it -> a shop-local date. When they name today's weekday
+// ("Thursday" on a Thursday) and that time, or the whole working day, has already passed,
+// they mean next week.
+export function resolveRequestedDay(date: string, time: string | undefined, now: DateTime) {
+  const said = resolveShopDay(date, now);
+  if (!said) {
+    return fail('invalid_date', `Got "${date}". Use a weekday ("thursday"), "today", "tomorrow", or a real date as YYYY-MM-DD.`);
+  }
+  if (!said.isTodayByWeekday) return { ok: true as const, day: said.day };
+
+  const resolved = time ? resolveTime(said.day, time) : null;
+  const hours = openingHours(said.day);
+  const passed = resolved?.kind === 'ok' ? resolved.start <= now : hours !== null && now >= hours.close;
+  return { ok: true as const, day: passed ? said.day.plus({ days: 7 }) : said.day };
+}
+
 // Date + time as the caller said them -> a start time, or a failure the LLM can act on.
 // Shared by booking and rescheduling so both reject bad input the same way.
 export function resolveRequestedStart(date: string, time: string) {
-  const day = parseShopDate(date);
-  if (!day) return fail('invalid_date', 'Date must be a real date in YYYY-MM-DD format.');
-  const resolved = resolveTime(day, time);
+  const requestedDay = resolveRequestedDay(date, time, nowInShop());
+  if (!requestedDay.ok) return requestedDay;
+  const resolved = resolveTime(requestedDay.day, time);
   if (resolved.kind === 'invalid') return fail('invalid_time', `Got "${time}", which is not a real time. Use H:mm, e.g. '4:30'.`);
   if (resolved.kind === 'ambiguous') return fail('ambiguous_time', 'Ask whether they mean morning or evening.');
   if (resolved.kind === 'outside_hours') {
@@ -108,8 +131,14 @@ export function hoursText(day: DateTime, schedule: Schedule): string | null {
 }
 
 // Times always reach the LLM with a label written by code, so it never works out weekdays itself.
+// "spoken" is the same label written out in words, for the voice channel.
 export function slotView(dt: DateTime) {
-  return { date: dt.toFormat('yyyy-MM-dd'), time: dt.toFormat('HH:mm'), label: formatForCaller(dt) };
+  return {
+    date: dt.toFormat('yyyy-MM-dd'),
+    time: dt.toFormat('HH:mm'),
+    label: formatForCaller(dt),
+    spoken: formatForSpeech(dt),
+  };
 }
 
 export function bookingView(b: Booking) {
