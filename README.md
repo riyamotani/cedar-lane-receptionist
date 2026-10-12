@@ -7,8 +7,7 @@ An AI receptionist for a small auto detailing shop. It books, changes and cancel
 
 **Demo videos**
 
-- Phase 1 (text chat): _add link_
-- Phase 2 (voice call): _add link_
+- Phase 1 (text chat) and Phase 2 (voice call): https://drive.google.com/drive/folders/1mgKTYpAZMulMOc5zvLaT5fLhoUZV8tlE?usp=sharing
 
 ## What it handles
 
